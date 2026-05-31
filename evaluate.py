@@ -11,6 +11,7 @@ import sys
 from contextlib import redirect_stdout
 from typing import Tuple, Optional
 
+from sympy.core.random import seed as sympy_seed
 from sympy.ntheory import factorint, isprime, randprime
 
 
@@ -23,7 +24,7 @@ def timeout_handler(signum, frame):
     raise TimeoutError("Factorization timed out")
 
 
-def factorint_with_timeout(n: int, timeout_seconds: int = 1) -> dict:
+def factorint_with_timeout(n: int, timeout_seconds: float = 1.0) -> dict:
     """
     Run factorint with a timeout.
 
@@ -38,15 +39,15 @@ def factorint_with_timeout(n: int, timeout_seconds: int = 1) -> dict:
         TimeoutError: If factorization takes longer than timeout_seconds
     """
     signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(timeout_seconds)
+    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
     try:
         result = factorint(n)
-        signal.alarm(0)  # Cancel the alarm
+        signal.setitimer(signal.ITIMER_REAL, 0)
         return result
     except TimeoutError:
         raise
     finally:
-        signal.alarm(0)  # Ensure alarm is cancelled
+        signal.setitimer(signal.ITIMER_REAL, 0)
 
 
 def validate_factorization(n: int, factors: dict) -> Tuple[bool, str]:
@@ -97,7 +98,12 @@ def generate_test_numbers(seed: int = 42, count: int = 100) -> list:
     Designed so baseline algorithm achieves ~50% success rate with 1s timeout.
     Hard numbers take ~5 seconds to factor (just beyond the 1s limit).
     """
+    # Seed BOTH the global RNG (used by random.randint/choice below) and
+    # SymPy's private RNG (used internally by randprime). Without the second
+    # seed, randprime draws different primes every run, so the semiprime test
+    # set (and thus the fitness) would not be reproducible.
     random.seed(seed)
+    sympy_seed(seed)
     numbers = []
 
     # === EASY (should pass with 1s timeout) - 50 numbers ===
@@ -152,16 +158,18 @@ def run_evaluation() -> Tuple[bool, str, float]:
     Returns:
         (is_valid: bool, message: str, success_rate: float)
     """
-    numbers = generate_test_numbers(seed=42, count=5)
+    numbers = generate_test_numbers(seed=42, count=100)
 
     passed = 0
     failed = 0
     first_error = None
 
+    timeout_seconds = 1.0
+
     for n in numbers:
         try:
-            # factors = factorint_with_timeout(n, timeout_seconds=1)
-            factors = factorint(n)
+            factors = factorint_with_timeout(n, timeout_seconds=timeout_seconds)
+            # factors = factorint(n)
             is_valid, error_msg = validate_factorization(n, factors)
             if is_valid:
                 passed += 1
@@ -172,7 +180,7 @@ def run_evaluation() -> Tuple[bool, str, float]:
         except TimeoutError:
             failed += 1
             if first_error is None:
-                first_error = f"n={n}: Factorization timed out (>1s)"
+                first_error = f"n={n}: Factorization timed out (>{timeout_seconds}s)"
         except Exception as e:
             failed += 1
             if first_error is None:
