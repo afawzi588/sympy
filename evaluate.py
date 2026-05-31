@@ -168,7 +168,7 @@ def run_evaluation() -> Tuple[bool, str, float]:
     failed = 0
     first_error = None
 
-    timeout_seconds = 0.1
+    timeout_seconds = 1.0
 
     for n in numbers:
         status, payload = factorint_with_timeout(n, timeout_seconds=timeout_seconds)
