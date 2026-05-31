@@ -9,7 +9,7 @@ import random
 import signal
 import sys
 from contextlib import redirect_stdout
-from typing import Tuple, Optional
+from typing import Tuple, Optional, cast
 
 from sympy.core.random import seed as sympy_seed
 from sympy.ntheory import factorint, isprime, randprime
@@ -24,28 +24,32 @@ def timeout_handler(signum, frame):
     raise TimeoutError("Factorization timed out")
 
 
-def factorint_with_timeout(n: int, timeout_seconds: float = 1.0) -> dict:
+def factorint_with_timeout(n: int, timeout_seconds: float = 1.0) -> Tuple[str, object]:
     """
-    Run factorint with a timeout.
+    Run factorint with a timeout, without propagating exceptions.
 
     Args:
         n: Number to factor
         timeout_seconds: Maximum time allowed for factorization
 
     Returns:
-        Dictionary of prime factors and their multiplicities
+        (status, payload):
+            ("ok", factors)   - factors is the dict of prime factors
+            ("timeout", None) - factorization exceeded timeout_seconds
+            ("error", msg)    - factorint raised; msg is the error string
 
-    Raises:
-        TimeoutError: If factorization takes longer than timeout_seconds
+    The SIGALRM handler raises internally to interrupt the running call, but
+    that is fully contained here and converted to a status; nothing is raised
+    to the caller.
     """
     signal.signal(signal.SIGALRM, timeout_handler)
     signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
     try:
-        result = factorint(n)
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        return result
+        return "ok", factorint(n)
     except TimeoutError:
-        raise
+        return "timeout", None
+    except Exception as e:  # noqa: BLE001 - any factorint failure counts as a failed case
+        return "error", str(e)
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
 
@@ -167,24 +171,23 @@ def run_evaluation() -> Tuple[bool, str, float]:
     timeout_seconds = 0.1
 
     for n in numbers:
-        try:
-            factors = factorint_with_timeout(n, timeout_seconds=timeout_seconds)
-            # factors = factorint(n)
-            is_valid, error_msg = validate_factorization(n, factors)
+        status, payload = factorint_with_timeout(n, timeout_seconds=timeout_seconds)
+        if status == "ok":
+            is_valid, error_msg = validate_factorization(n, cast(dict, payload))
             if is_valid:
                 passed += 1
             else:
                 failed += 1
                 if first_error is None:
                     first_error = f"n={n}: {error_msg}"
-        except TimeoutError:
+        elif status == "timeout":
             failed += 1
             if first_error is None:
                 first_error = f"n={n}: Factorization timed out (>{timeout_seconds}s)"
-        except Exception as e:
+        else:  # status == "error"
             failed += 1
             if first_error is None:
-                first_error = f"n={n}: Exception - {str(e)}"
+                first_error = f"n={n}: Exception - {payload}"
 
     success_rate = passed / (passed + failed)
 
