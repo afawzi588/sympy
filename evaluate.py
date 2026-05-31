@@ -164,7 +164,7 @@ def run_evaluation() -> Tuple[bool, str, float]:
     failed = 0
     first_error = None
 
-    timeout_seconds = 1.0
+    timeout_seconds = 0.1
 
     for n in numbers:
         try:
