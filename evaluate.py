@@ -253,5 +253,5 @@ if __name__ == "__main__":
             "fitness": fitness,
             "signature": (fitness,)
         },
-        "metainfo": metainfo
+        "metainfo": "Success"
     }))
